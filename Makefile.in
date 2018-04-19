@@ -1,17 +1,18 @@
-
+TF_CFLAGS=$(shell python -c 'import tensorflow as tf; print(" ".join(tf.sysconfig.get_compile_flags()))')
+TF_LFLAGS=$(shell python -c 'import tensorflow as tf; print(" ".join(tf.sysconfig.get_link_flags()))')
 # Which compiler to use
 CC = g++
 # To compile the Matlab interface in Windows using cygwin, I used:
 # CC = g++ -mno-cygwin -mwindows
 
 # What optimization level to use
-OPTFLAGS = -O2 -fPIC -Wall -Wno-deprecated 
+OPTFLAGS = -O2 -fPIC -Wall -Wno-deprecated -std=c++11  ${TF_CFLAGS} ${TF_LFLAGS}
 
 # What options to be used by the compiler
-COPTIONS = -DNUMBITS=64
+COPTIONS = -DNUMBITS=32
 
 # What options to be used by the loader
-LDOPTIONS = 
+LDOPTIONS = -O2 -fPIC -Wall -Wno-deprecated -std=c++11  ${TF_CFLAGS} ${TF_LFLAGS}
 
 # What archiving to use
 AR = ar rv
