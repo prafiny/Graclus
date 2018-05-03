@@ -196,9 +196,7 @@
 
 /* Undefine the following #define in order to use short int as the idxtype */
 //#define IDXTYPE_INT
-#ifndef NUMBITS
-#define NUMBITS 32
-#endif
+#define NUMBITS 64
 
 /* Indexes are as long as integers for now */
 #if NUMBITS == 64

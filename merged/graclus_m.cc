@@ -25,7 +25,7 @@ int memory_saving; /* forbid using local search or empty cluster removing */
 /*************************************************************************
 * multi-level weighted kernel k-means main function
 **************************************************************************/
-idxtype* graclus(std::vector<int>& xadj, std::vector<int>& adjncy, std::vector<int>& adjwgt, int n_clust, int n_vtxs)
+idxtype* graclus(std::vector<idxtype>& xadj, std::vector<idxtype>& adjncy, std::vector<idxtype>& adjwgt, int n_clust, int n_vtxs)
 {
   int edgenum, curredge, numedges, currval;
 
@@ -38,11 +38,11 @@ idxtype* graclus(std::vector<int>& xadj, std::vector<int>& adjncy, std::vector<i
   int numflag = 0, wgtflag = 0, edgecut, chain_length;
   int no_args = 1, clusteringEva =0, levels;
   idxtype *t1, *t2;
-
+    
   edgenum = adjncy.size();
   nparts = n_clust;
   cutType = 0;
-  chain_length = 0;
+  chain_length = 10;
   spectral_initialization = 0;
   
   memory_saving = 0;
@@ -69,20 +69,20 @@ idxtype* graclus(std::vector<int>& xadj, std::vector<int>& adjncy, std::vector<i
    if (readvw)
      wgtflag += 2;
 
-   /*levels = 5*nparts;*/
-   levels = amax((graph.nvtxs)/(40*log2_metis(nparts)), 5*(nparts));
+   levels = 5*nparts;
+   //levels = amax((graph.nvtxs)/(40*log2_metis(nparts)), 5*(nparts));
    /*printf("Will coarsen until %d nodes...\n", levels);*/
 
   part = (idxtype*) malloc(sizeof(idxtype)*(graph.nvtxs));
   options[0] = 0;
     if (graph.ncon == 1) 
     {
-      /*METIS_PartGraphKway(&graph.nvtxs, graph.xadj, graph.adjncy, graph.vwgt, graph.adjwgt, 
+      METIS_PartGraphKway(&graph.nvtxs, graph.xadj, graph.adjncy, NULL, graph.adjwgt, 
 	&wgtflag, &numflag, &nparts, options, &edgecut, part); 
-      */
+      /*
       MLKKM_PartGraphKway(&graph.nvtxs, graph.xadj, graph.adjncy, graph.vwgt, graph.adjwgt, 
 			  &wgtflag, &numflag, &nparts, &chain_length, options, &edgecut, part, levels);
-    
+    */
       /* ends */
     }
     else {
@@ -93,20 +93,21 @@ idxtype* graclus(std::vector<int>& xadj, std::vector<int>& adjncy, std::vector<i
 	graph.adjwgt, &wgtflag, &numflag, &nparts, rubvec, options, &edgecut, part);
       */
     }
-  ComputePartitionBalance(&graph, nparts, part, lbvec);
+  /*ComputePartitionBalance(&graph, nparts, part, lbvec);
   if (cutType == 0){
     result = ComputeNCut(&graph, part, nparts);
   }
   else{
     result = ComputeRAsso(&graph, part, nparts);
-  }
+  }*/
+    
   return part;
 }  
 
 
 REGISTER_OP("Graclus")
     .Input("adj: bool")
-    .Input("weights: float32")
+    .Input("weights: int32")
     .Input("n_clusters: int32")
     .Output("supernode_assign: float32")
     .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* c) {        
@@ -123,7 +124,7 @@ class GraclusOp : public OpKernel {
     const Tensor& adj = context->input(0);
     auto adj_arr = adj.tensor<bool, 3>();
     const Tensor& weights = context->input(1);
-    auto weights_arr = weights.tensor<float, 3>();
+    auto weights_arr = weights.tensor<int, 3>();
     const Tensor& n_clusters = context->input(2);
     auto n_clusters_arr = n_clusters.tensor<int, 1>();
     // Create an output tensor
@@ -148,36 +149,48 @@ class GraclusOp : public OpKernel {
     const int batch_size = output_shape[0];
     std::function<void(int64, int64)> shard;
     shard = [&adj_arr, &weights_arr, &n_clusters_arr, &supernode_assign_arr, &output_shape](int64 start, int64 limit) {
+        int i;
         for (int graph = start; graph < limit; ++graph) {
+            //std::cout << "test" << std::endl;
             int n_clus = n_clusters_arr(graph);
-            std::vector<int> xadj;
+            std::vector<idxtype> xadj;
             xadj.push_back(0);
-            std::vector<int> adjncy;
-            std::vector<int> adjwgt;
+            std::vector<idxtype> adjncy;
+            std::vector<idxtype> adjwgt;
             std::vector<int> ids;
             for (int m = 0; m < output_shape[1]; m++) {
                 if (adj_arr(graph, m, m)) {
                     ids.push_back(m);
-                    for (int n = 0; n < output_shape[0]; n++) {
-                        if (m != n && adj_arr(graph, m, n)) {
-                            adjncy.push_back(n);
-                            adjwgt.push_back(weights_arr(graph, m, n));
-                        }
-                    }
-                    xadj.push_back(adjncy.size());
                 }
             }
-            std::cout << "test" << std::endl;
-            idxtype* assign = graclus(xadj, adjncy, adjwgt, n_clus, ids.size());
-            for(int i = 0; i < ids.size(); i++) {
-                supernode_assign_arr(graph, ids[i], assign[i]) = 1.;
+            if (ids.size() > 0) {
+                if (n_clus > 1) {
+                    for (int m = 0; m < ids.size(); m++) {
+                        for (int n = 0; n < ids.size(); n++) {
+                            if (m != n && adj_arr(graph, m, n)) {
+                                adjncy.push_back(n);
+                                adjwgt.push_back(weights_arr(graph, ids[m], ids[n]));
+                            }
+                        }
+                        xadj.push_back(adjncy.size());
+                    }
+                    idxtype* assign = graclus(xadj, adjncy, adjwgt, n_clus, ids.size());
+                    for(i = 0; i < ids.size(); i++) {
+                        supernode_assign_arr(graph, ids[i], ids[assign[i]]) = 1.;
+                    }
+                    free(assign);
+                }
+                else {
+                    for(i = 0; i < ids.size(); i++) {
+                        supernode_assign_arr(graph, ids[i], ids[i]) = 1.;
+                    }
+                }
             }
-            free(assign);
         }
     };
 
     // This is just a very crude approximation
-    const int64 single_cost = 10000 * output_shape[1] * output_shape[2];
+    const int64 single_cost = 1000 * output_shape[1] * output_shape[2];
 
     auto worker_threads = context->device()->tensorflow_cpu_worker_threads();
     Shard(worker_threads->num_threads, worker_threads->workers, batch_size, single_cost, shard);
